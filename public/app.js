@@ -1,3 +1,40 @@
+let supabaseClient = null;
+
+// Función para inicializar Supabase obteniendo credenciales del servidor
+async function initSupabase() {
+  try {
+    const configResponse = await fetch('/api/config');
+    const config = await configResponse.json();
+    
+    if (!config.supabaseUrl || !config.supabaseKey) {
+      throw new Error('Faltan credenciales');
+    }
+
+    // Inicializamos el cliente oficial
+    // 'supabase' es una variable global inyectada por el script del CDN
+    supabaseClient = supabase.createClient(config.supabaseUrl, config.supabaseKey);
+
+    // Escuchar cambios de autenticación (opcional, para depuración)
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+      console.log("Evento de Auth:", event);
+      if (event === 'PASSWORD_RECOVERY') {
+        // El usuario entró con un link de recuperación válido
+        console.log("Modo recuperación activo");
+      }
+    });
+
+  } catch (error) {
+    console.error("Error iniciando Supabase:", error);
+    const errorDiv = document.getElementById('error');
+    errorDiv.textContent = 'Error de configuración. No se puede conectar al sistema.';
+    errorDiv.style.display = 'block';
+    document.getElementById('submitBtn').disabled = true;
+  }
+}
+
+// Inicializamos apenas carga el script
+initSupabase();
+
 document.getElementById('resetForm').addEventListener('submit', async (e) => {
   e.preventDefault();
 
@@ -12,74 +49,52 @@ document.getElementById('resetForm').addEventListener('submit', async (e) => {
   errorDiv.style.display = 'none';
   successDiv.style.display = 'none';
 
-  // 1. Validaciones
+  // 1. Validaciones básicas
   if (password !== confirmPassword) {
     errorDiv.textContent = 'Las contraseñas no coinciden';
     errorDiv.style.display = 'block';
     return;
   }
 
-  if (password.length < 6) {
-    errorDiv.textContent = 'La contraseña debe tener al menos 6 caracteres';
+  if (!supabaseClient) {
+    errorDiv.textContent = 'El sistema no está listo. Recarga la página.';
     errorDiv.style.display = 'block';
     return;
   }
 
-  // 2. Obtener access token de la URL
-  const hash = window.location.hash.substring(1);
-  const params = new URLSearchParams(hash);
-  const accessToken = params.get('access_token');
-
-  if (!accessToken) {
-    errorDiv.textContent = 'Token inválido o expirado';
-    errorDiv.style.display = 'block';
-    return;
-  }
-
+  // UI Loading
   submitBtn.disabled = true;
   btnText.style.display = 'none';
   btnLoader.style.display = 'inline-block';
 
   try {
-    // 3. PASO NUEVO: Pedir credenciales al servidor (Vercel)
-    const configResponse = await fetch('/api/config');
-    if (!configResponse.ok) throw new Error('No se pudo obtener la configuración');
-    
-    const config = await configResponse.json();
-    const SUPABASE_URL = config.supabaseUrl;
-    const SUPABASE_KEY = config.supabaseKey;
-
-    if (!SUPABASE_URL || !SUPABASE_KEY) {
-      throw new Error('Credenciales no configuradas en el servidor');
-    }
-
-    // 4. Petición a Supabase usando las variables obtenidas
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${accessToken}`
-      },
-      body: JSON.stringify({ password })
+    // 2. ACTUALIZACIÓN DE CONTRASEÑA USANDO LA LIBRERÍA
+    // La librería ya detectó el token de la URL y autenticó al usuario internamente
+    const { data, error } = await supabaseClient.auth.updateUser({
+      password: password
     });
 
-    if (response.ok) {
-      successDiv.textContent = '¡Contraseña actualizada exitosamente!';
-      successDiv.style.display = 'block';
-      document.getElementById('resetForm').reset();
+    if (error) throw error;
 
-      setTimeout(() => {
-        window.close(); // O redirigir a tu app principal
-      }, 3000);
-    } else {
-      const error = await response.json();
-      errorDiv.textContent = error.message || 'Error al actualizar contraseña';
-      errorDiv.style.display = 'block';
-    }
+    successDiv.textContent = '¡Contraseña actualizada exitosamente!';
+    successDiv.style.display = 'block';
+    document.getElementById('resetForm').reset();
+
+    // Cierre o redirección opcional
+    setTimeout(() => {
+        // Puedes redirigir a tu app o cerrar
+        // window.location.href = 'https://tu-app-principal.com'; 
+        window.close();
+    }, 3000);
+
   } catch (error) {
     console.error(error);
-    errorDiv.textContent = 'Error de conexión o configuración. Intenta nuevamente.';
+    // Mensajes de error amigables
+    let msg = error.message;
+    if (msg.includes("weak")) msg = "La contraseña es muy débil.";
+    if (msg.includes("same")) msg = "Usa una contraseña diferente a la anterior.";
+    
+    errorDiv.textContent = msg || 'Error al actualizar. ¿Quizás el enlace expiró?';
     errorDiv.style.display = 'block';
   } finally {
     submitBtn.disabled = false;
