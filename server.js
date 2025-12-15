@@ -18,7 +18,7 @@ app.get('/reset-password', (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok' });
+  res.status(200).json({ status: 'ok' }); 
 });
 
 // --- NUEVO ENDPOINT ---
